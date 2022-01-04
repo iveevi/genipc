@@ -1,13 +1,14 @@
 #ifndef SOCKET_H_
 #define SOCKET_H_
 
-// Socket headers
-// TODO: new repo. general ipc headers
-// TODO: switch for different os
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+// UNIX headers
+#include <arpa/inet.h>
 #include <netdb.h>
+#include <netinet/in.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 // Standard headers
 #include <iostream>
@@ -20,6 +21,8 @@ class SocketStream {
 	std::string	_serv;
 public:
 	// Constructor
+	SocketStream() {}
+
 	SocketStream(int socket, std::string host, std::string serv) :
 		_socket(socket), _host(host), _serv(serv) {}
 	
@@ -100,22 +103,47 @@ class Socket {
 
 	// Creating listening socket
 	// TODO: logger class
-	void _mk_listener() {
+	void _mk_socket() {
 		_fd = socket(AF_INET, SOCK_STREAM, 0);
-		if (_fd < 0)
-			throw "Error creating socket";
+		if (_fd <= 0) // TODO: throw classes
+			throw SocketException("Error creating socket");
 	}
 public:
 	Socket() {}
+
+	// Close in the end anyways
+	~Socket() {
+		::close(_fd);
+	}
 
 	// Close listening socket
 	void close() {
 		::close(_fd);
 	}
 
+	// Connect to server
+	SocketStream connect(std::string host, int port) {
+		_mk_socket();
+
+		// Setup address structure
+		_addr.sin_family = AF_INET;
+		_addr.sin_port = htons(port);
+
+		// Convert host to binary
+		if (inet_pton(AF_INET, host.c_str(), &_addr.sin_addr) <= 0)
+			throw SocketException("Error converting host to binary");
+
+		// Connect to server
+		if (::connect(_fd, (sockaddr *) &_addr, sizeof(_addr)) < 0)
+			throw SocketException("Error connecting to server");
+
+		// Return socket stream
+		return SocketStream(_fd, host, std::to_string(port));
+	}
+
 	// Bind socket to port
 	void bind(int port) {
-		_mk_listener();	// TODO: in constructor?
+		_mk_socket();	// TODO: in constructor?
 
 		// Create socket address
 		int optval = 1;
@@ -146,7 +174,7 @@ public:
 		// Bind socket to port
 		ret = ::bind(_fd, (sockaddr *) &_addr, sizeof(_addr));
 		if (ret < 0) {
-			throw std::runtime_error("Socket: Error binding socket");
+			throw SocketException("Socket: Error binding socket");
 		}
 
 		// TODO: pass backlog
@@ -191,6 +219,13 @@ public:
 	int port() {
 		return _port;
 	}
+
+	// Generic socket exception class
+	class SocketException : public std::runtime_error {
+	public:
+		SocketException(const char *msg)
+				: std::runtime_error(std::string("Socket: ") + msg) {}
+	};
 };
 
 #endif
