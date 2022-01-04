@@ -10,9 +10,76 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+// TODO: cross compatibility... (eg Windows)
+
 // Standard headers
 #include <iostream>
+#include <memory>
 #include <stdexcept>
+
+// Namespace for all resources
+namespace genipc {
+
+// Shared memory
+class SharedMemory {
+private:
+	// Handle to shared memory
+	//	will differ across
+	//	operating systems
+	struct _unix_handle {
+		int shmid;
+
+		// Identifier structure
+		struct _id {
+			std::string path;
+			int id;
+		};
+
+		// Default constructor
+		_unix_handle() = default;
+
+		// Create the shared memory id
+		_unix_handle(const _id &id, size_t size) {
+			key_t key = ftok(id.path.c_str(), id.id);
+			shmid = shmget(key, size, IPC_CREAT | 0666);
+		}
+
+		// Destructor, destroys the shared memory
+		~_unix_handle() {
+			shmctl(shmid, IPC_RMID, nullptr);
+		}
+
+		void *alloc() {
+			return shmat(shmid, 0, 0);
+		}
+	};
+
+	using handle_t = _unix_handle;
+
+	// Current handle
+	handle_t _handle;
+public:
+	// Shared memory identifier structure
+	using id_t = handle_t::_id;
+	
+	// Constructor
+	SharedMemory(const id_t &id, size_t size)
+		: _handle(id, size) {}
+
+	// Allocation and deallocation
+	template <class T = char>
+	std::shared_ptr <T> get() {
+		return std::shared_ptr <T> {
+			(T *) _handle.alloc(),
+			[](T *ptr) {
+				// Custom deleter
+				shmdt(ptr);
+			}
+		};
+	}
+};
+
+}
 
 // SocketStream class
 class SocketStream {
